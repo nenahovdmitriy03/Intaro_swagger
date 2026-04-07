@@ -12,11 +12,57 @@
       body {
         margin: 0;
         padding: 0;
+        font-family: Arial, sans-serif;
+        background: #ffffff;
+        color: #111111;
+      }
+
+      #status {
+        padding: 24px;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      #redoc-container {
+        display: none;
       }
     </style>
     <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
   </head>
   <body>
-    <redoc spec-url="./yandex_checkout_openapi.yaml"></redoc>
+    <div id="status">Загрузка документации...</div>
+    <div id="redoc-container"></div>
+    <script>
+      window.addEventListener('load', function () {
+        var status = document.getElementById('status');
+        var container = document.getElementById('redoc-container');
+
+        if (!window.Redoc || typeof window.Redoc.init !== 'function') {
+          status.innerHTML =
+            'Не удалось загрузить ReDoc из CDN. Проверьте доступ к внешним скриптам и обновите страницу.';
+          return;
+        }
+
+        window.Redoc.init(
+          './yandex_checkout_openapi.yaml',
+          {
+            hideDownloadButton: false,
+            expandResponses: '200,201'
+          },
+          container,
+          function (error) {
+            if (error) {
+              status.innerHTML =
+                'Не удалось загрузить спецификацию <code>yandex_checkout_openapi.yaml</code>. ' +
+                'Проверьте, что файл лежит в корне репозитория рядом с <code>index.html</code>.';
+              return;
+            }
+
+            status.style.display = 'none';
+            container.style.display = 'block';
+          }
+        );
+      });
+    </script>
   </body>
 </html>
