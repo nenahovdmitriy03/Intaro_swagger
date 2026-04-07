@@ -1,0 +1,936 @@
+openapi: 3.0.3
+info:
+  title: Yandex Checkout (YCP) CRM API
+  version: 1.0.0
+  description: |
+    Swagger/OpenAPI-спецификация для входящих методов интеграции Yandex Checkout (YCP),
+    которые вызывает Яндекс на стороне CRM.
+
+    Особенности:
+    - направление вызовов: `Яндекс -> CRM`;
+    - авторизация выполняется по заголовку `Authorization: <token>`;
+    - в заголовке передается сырой токен без префикса `Bearer`.
+
+    Спецификация подготовлена по ТЗ для методов:
+    - `GET /api/v1/warehouses`
+    - `POST /api/v1/checkout/basket/check`
+    - `GET /api/v1/checkout/delivery/pickup_points`
+    - `POST /api/v1/checkout/delivery/options`
+    - `POST /api/v1/checkout`
+    - `POST /api/v1/checkout/placed`
+    - `POST /api/v1/checkout/cancel`
+servers:
+  - url: https://crm.example.com
+    description: Production CRM
+  - url: https://crm-stage.example.com
+    description: Staging CRM
+tags:
+  - name: Warehouses
+    description: Справочник складов и точек самовывоза
+  - name: Basket
+    description: Проверка корзины перед оформлением
+  - name: Delivery
+    description: Получение ПВЗ и расчет вариантов доставки
+  - name: Checkout
+    description: Создание, подтверждение и отмена checkout-сессии
+security:
+  - ycpTokenAuth: []
+
+paths:
+  /api/v1/warehouses:
+    get:
+      tags: [Warehouses]
+      summary: Получение списка складов
+      description: Яндекс запрашивает доступные склады и точки самовывоза магазина в контексте бренда.
+      operationId: getWarehouses
+      responses:
+        '200':
+          description: Список складов и точек самовывоза
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarehousesResponse'
+              examples:
+                success:
+                  value:
+                    warehouses:
+                      - id: wh_msk_01
+                        title: Склад Москва
+                        address: г. Москва, ул. Ленина, 1
+                        phone: +7 495 123-45-67
+                        description: Основной склад бренда
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/checkout/basket/check:
+    post:
+      tags: [Basket]
+      summary: Проверка цен и остатков по корзине
+      description: |
+        Вызывается при открытии checkout и при изменении состава корзины.
+        Может вызываться многократно в рамках одной пользовательской сессии.
+      operationId: checkBasket
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BasketCheckRequest'
+            examples:
+              default:
+                value:
+                  items:
+                    - id: "50"
+                      quantity: 2
+      responses:
+        '200':
+          description: Актуальные цены и остатки по товарам корзины
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BasketCheckResponse'
+              examples:
+                success:
+                  value:
+                    items:
+                      - id: "50"
+                        name: Кроссовки Air
+                        regular_price: 12990
+                        final_price: 10990
+                        img: https://cdn.example.com/products/50.jpg
+                        url: https://shop.example.com/product/50
+                        warehouses:
+                          - id: wh_msk_01
+                            available_quantity: 5
+                        dimensions:
+                          width: 30
+                          height: 12
+                          depth: 18
+                          weight: 0.8
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: Товар не найден
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notFound:
+                  value:
+                    error: Товар не найден
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/checkout/delivery/pickup_points:
+    get:
+      tags: [Delivery]
+      summary: Получение списка ПВЗ
+      description: CRM возвращает список ПВЗ всех подключенных для бренда служб доставки.
+      operationId: getPickupPoints
+      responses:
+        '200':
+          description: Список пунктов выдачи
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PickupPointsResponse'
+              examples:
+                success:
+                  value:
+                    pickup_points:
+                      - id: pvz_123
+                        address: г. Москва, ул. Тверская, д. 10
+                        has_fitting: true
+                        is_cash_available: true
+                        is_card_available: true
+                        working_hours:
+                          mon: 10:00-21:00
+                          tue: 10:00-21:00
+                          wed: 10:00-21:00
+                          thu: 10:00-21:00
+                          fri: 10:00-21:00
+                          sat: 10:00-21:00
+                          sun: 10:00-21:00
+                        coordinates:
+                          lat: 55.7558
+                          lon: 37.6176
+                        description: ПВЗ у метро
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/checkout/delivery/options:
+    post:
+      tags: [Delivery]
+      summary: Расчет вариантов доставки
+      description: Вызывается после выбора адреса доставки или ПВЗ.
+      operationId: getDeliveryOptions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryOptionsRequest'
+            examples:
+              pickupPoint:
+                value:
+                  items:
+                    - id: "50"
+                      quantity: 2
+                  delivery_target:
+                    delivery_method: pickup_point
+                    address:
+                      locality: Москва
+                      address: ул. Тверская, д. 10
+                      pickup_point_id: pvz_123
+              courier:
+                value:
+                  items:
+                    - id: "50"
+                      quantity: 1
+                  delivery_target:
+                    delivery_method: courier
+                    address:
+                      locality: Москва
+                      address: ул. Арбат, д. 15
+                      apartment: "10"
+                      entrance: "2"
+                      floor: "4"
+                      intercom: "45"
+      responses:
+        '200':
+          description: Доступные варианты доставки
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeliveryOptionsResponse'
+              examples:
+                success:
+                  value:
+                    options:
+                      - date: "2026-04-08"
+                        time_interval: 10:00-14:00
+                        cost: 350
+                      - date: "2026-04-09"
+                        time_interval: 14:00-18:00
+                        cost: 250
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/checkout:
+    post:
+      tags: [Checkout]
+      summary: Создание сессии чекаута
+      description: |
+        Яндекс вызывает метод, когда покупатель переходит к оплате.
+        CRM должна повторно проверить цены и остатки, создать заказ и зарезервировать товар.
+      operationId: createCheckoutSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCheckoutRequest'
+            examples:
+              default:
+                value:
+                  session_id: 019c18f6-cb3c-7f31-9395-53925a6b0e28
+                  warehouse_id: wh_msk_01
+                  items:
+                    - id: "50"
+                      quantity: 2
+                      regular_price: 12990
+                      final_price: 10990
+                  customer:
+                    full_name: Иван Иванов
+                    phone: +79991234567
+                    email: user@example.com
+                  delivery:
+                    delivery_method: courier
+                    service_type: cdek
+                    service_display_name: СДЭК курьер
+                    price: 350
+                    address:
+                      locality: Москва
+                      address: ул. Арбат, д. 15
+                      apartment: "10"
+                      entrance: "2"
+                      floor: "4"
+                      intercom: "45"
+      responses:
+        '201':
+          description: Заказ успешно создан
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCheckoutSuccessResponse'
+              examples:
+                created:
+                  value:
+                    order_id: ORDER_12345
+                    internal_order_id: 185
+                    status: created
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '409':
+          description: Изменились цены/остатки либо заказ уже существует
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateCheckoutConflictResponse'
+              examples:
+                inventoryConflict:
+                  value:
+                    error: Изменились остатки
+                    actual_inventory:
+                      items:
+                        - id: "50"
+                          warehouses:
+                            - id: wh_msk_01
+                              available_quantity: 1
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/checkout/placed:
+    post:
+      tags: [Checkout]
+      summary: Подтверждение оформления заказа
+      description: Яндекс вызывает метод после оплаты или подтверждения способа оплаты при получении.
+      operationId: placeCheckoutOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutPlacedRequest'
+            examples:
+              online:
+                value:
+                  session_id: 019c18f6-cb3c-7f31-9395-53925a6b0e28
+                  order_id: ORDER_12345
+                  payment_method: online
+              onDelivery:
+                value:
+                  session_id: 019c18f6-cb3c-7f31-9395-53925a6b0e28
+                  order_id: ORDER_12345
+                  payment_method: on_delivery
+      responses:
+        '200':
+          description: Заказ успешно подтвержден
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: Сессия или заказ не найдены
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notFound:
+                  value:
+                    error: Сессия не найдена
+        '409':
+          description: Заказ уже отменен
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                cancelled:
+                  value:
+                    error: Заказ уже отменен
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/checkout/cancel:
+    post:
+      tags: [Checkout]
+      summary: Отмена сессии чекаута
+      description: |
+        Яндекс вызывает метод, если покупатель не завершил оформление,
+        либо если сессия чекаута отменена на стороне Яндекса.
+      operationId: cancelCheckoutSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckoutCancelRequest'
+            examples:
+              default:
+                value:
+                  session_id: 019c18f6-cb3c-7f31-9395-53925a6b0e28
+      responses:
+        '200':
+          description: Сессия успешно отменена
+        '400':
+          $ref: '#/components/responses/BadRequestError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '404':
+          description: Сессия не найдена
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notFound:
+                  value:
+                    error: Сессия не найдена
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    ycpTokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: "Токен YCP в формате `Authorization: <token>` без префикса `Bearer`"
+
+  responses:
+    BadRequestError:
+      description: Неверный формат запроса
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            badRequest:
+              value:
+                error: Неверный формат запроса
+    UnauthorizedError:
+      description: Не авторизован
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unauthorized:
+              value:
+                error: Unauthorized
+    InternalServerError:
+      description: Ошибка сервера
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            internal:
+              value:
+                error: Internal server error
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+          description: Человекочитаемое описание ошибки
+          example: Unauthorized
+
+    CartItemRequest:
+      type: object
+      required: [id, quantity]
+      properties:
+        id:
+          type: string
+          description: Идентификатор товара
+          example: "50"
+        quantity:
+          type: integer
+          minimum: 1
+          description: Количество товара
+          example: 2
+
+    WarehouseAvailability:
+      type: object
+      required: [id, available_quantity]
+      properties:
+        id:
+          type: string
+          description: Идентификатор склада
+          example: wh_msk_01
+        available_quantity:
+          type: integer
+          minimum: 0
+          description: Доступный остаток
+          example: 5
+
+    Dimensions:
+      type: object
+      properties:
+        width:
+          type: number
+          format: double
+          description: Ширина
+          example: 30
+        height:
+          type: number
+          format: double
+          description: Высота
+          example: 12
+        depth:
+          type: number
+          format: double
+          description: Глубина
+          example: 18
+        weight:
+          type: number
+          format: double
+          description: Вес
+          example: 0.8
+
+    Warehouse:
+      type: object
+      required: [id, title, address, phone, description]
+      properties:
+        id:
+          type: string
+          description: Идентификатор склада
+          example: wh_msk_01
+        title:
+          type: string
+          description: Название
+          example: Склад Москва
+        address:
+          type: string
+          description: Адрес
+          example: г. Москва, ул. Ленина, 1
+        phone:
+          type: string
+          description: Телефон
+          example: +7 495 123-45-67
+        description:
+          type: string
+          description: Описание
+          example: Основной склад бренда
+
+    WarehousesResponse:
+      type: object
+      required: [warehouses]
+      properties:
+        warehouses:
+          type: array
+          description: Список складов
+          items:
+            $ref: '#/components/schemas/Warehouse'
+
+    BasketCheckRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          description: Список позиций корзины
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CartItemRequest'
+
+    BasketItemResponse:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          example: "50"
+        name:
+          type: string
+          description: Название товара
+          example: Кроссовки Air
+        regular_price:
+          type: number
+          format: double
+          description: Цена без скидки
+          example: 12990
+        final_price:
+          type: number
+          format: double
+          description: Цена со скидками
+          example: 10990
+        img:
+          type: string
+          format: uri
+          description: Ссылка на картинку
+          example: https://cdn.example.com/products/50.jpg
+        url:
+          type: string
+          format: uri
+          description: Ссылка на товар
+          example: https://shop.example.com/product/50
+        warehouses:
+          type: array
+          description: Остатки по складам
+          items:
+            $ref: '#/components/schemas/WarehouseAvailability'
+        dimensions:
+          $ref: '#/components/schemas/Dimensions'
+
+    BasketCheckResponse:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BasketItemResponse'
+
+    WorkingHours:
+      type: object
+      properties:
+        mon:
+          type: string
+          example: 10:00-21:00
+        tue:
+          type: string
+          example: 10:00-21:00
+        wed:
+          type: string
+          example: 10:00-21:00
+        thu:
+          type: string
+          example: 10:00-21:00
+        fri:
+          type: string
+          example: 10:00-21:00
+        sat:
+          type: string
+          example: 10:00-21:00
+        sun:
+          type: string
+          example: 10:00-21:00
+
+    Coordinates:
+      type: object
+      required: [lat, lon]
+      properties:
+        lat:
+          type: number
+          format: double
+          description: Широта
+          example: 55.7558
+        lon:
+          type: number
+          format: double
+          description: Долгота
+          example: 37.6176
+
+    PickupPoint:
+      type: object
+      required:
+        - id
+        - address
+        - has_fitting
+        - is_cash_available
+        - is_card_available
+      properties:
+        id:
+          type: string
+          description: Идентификатор ПВЗ
+          example: pvz_123
+        address:
+          type: string
+          description: Адрес
+          example: г. Москва, ул. Тверская, д. 10
+        has_fitting:
+          type: boolean
+          description: Примерка разрешена
+          example: true
+        is_cash_available:
+          type: boolean
+          description: Доступна оплата наличными
+          example: true
+        is_card_available:
+          type: boolean
+          description: Доступна оплата картой
+          example: true
+        working_hours:
+          $ref: '#/components/schemas/WorkingHours'
+        coordinates:
+          $ref: '#/components/schemas/Coordinates'
+        description:
+          type: string
+          description: Описание
+          example: ПВЗ у метро
+
+    PickupPointsResponse:
+      type: object
+      required: [pickup_points]
+      properties:
+        pickup_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/PickupPoint'
+
+    DeliveryMethod:
+      type: string
+      description: Способ доставки
+      enum: [courier, pickup_point]
+      example: pickup_point
+
+    Address:
+      type: object
+      properties:
+        locality:
+          type: string
+          description: Населенный пункт
+          example: Москва
+        address:
+          type: string
+          description: Улица, дом
+          example: ул. Арбат, д. 15
+        apartment:
+          type: string
+          description: Квартира
+          example: "10"
+        entrance:
+          type: string
+          description: Подъезд
+          example: "2"
+        floor:
+          type: string
+          description: Этаж
+          example: "4"
+        intercom:
+          type: string
+          description: Домофон
+          example: "45"
+        pickup_point_id:
+          type: string
+          description: Идентификатор ПВЗ
+          example: pvz_123
+
+    DeliveryTarget:
+      type: object
+      required: [delivery_method, address]
+      properties:
+        delivery_method:
+          $ref: '#/components/schemas/DeliveryMethod'
+        address:
+          $ref: '#/components/schemas/Address'
+
+    DeliveryOptionsRequest:
+      type: object
+      required: [items, delivery_target]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CartItemRequest'
+        delivery_target:
+          $ref: '#/components/schemas/DeliveryTarget'
+
+    DeliveryOption:
+      type: object
+      required: [date, cost]
+      properties:
+        date:
+          type: string
+          format: date
+          description: Дата доставки
+          example: "2026-04-08"
+        time_interval:
+          type: string
+          description: Временной интервал доставки
+          example: 10:00-14:00
+        cost:
+          type: number
+          format: double
+          description: Стоимость доставки
+          example: 350
+
+    DeliveryOptionsResponse:
+      type: object
+      required: [options]
+      properties:
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/DeliveryOption'
+
+    CheckoutItem:
+      type: object
+      required: [id, quantity, regular_price, final_price]
+      properties:
+        id:
+          type: string
+          description: Идентификатор товара
+          example: "50"
+        quantity:
+          type: integer
+          minimum: 1
+          description: Количество
+          example: 2
+        regular_price:
+          type: number
+          format: double
+          description: Цена без скидки
+          example: 12990
+        final_price:
+          type: number
+          format: double
+          description: Цена со скидками
+          example: 10990
+
+    Customer:
+      type: object
+      required: [full_name, phone]
+      properties:
+        full_name:
+          type: string
+          description: ФИО покупателя
+          example: Иван Иванов
+        phone:
+          type: string
+          description: Телефон
+          example: +79991234567
+        email:
+          type: string
+          format: email
+          description: Email
+          example: user@example.com
+
+    CheckoutDelivery:
+      type: object
+      required:
+        - delivery_method
+        - service_type
+        - service_display_name
+        - price
+        - address
+      properties:
+        delivery_method:
+          $ref: '#/components/schemas/DeliveryMethod'
+        service_type:
+          type: string
+          description: Код службы доставки
+          example: cdek
+        service_display_name:
+          type: string
+          description: Отображаемое имя службы доставки
+          example: СДЭК курьер
+        price:
+          type: number
+          format: double
+          description: Стоимость доставки
+          example: 350
+        address:
+          $ref: '#/components/schemas/Address'
+
+    CreateCheckoutRequest:
+      type: object
+      required: [session_id, warehouse_id, items, customer, delivery]
+      properties:
+        session_id:
+          type: string
+          description: Идентификатор сессии чекаута на стороне Яндекса
+          example: 019c18f6-cb3c-7f31-9395-53925a6b0e28
+        warehouse_id:
+          type: string
+          description: Склад отгрузки
+          example: wh_msk_01
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/CheckoutItem'
+        customer:
+          $ref: '#/components/schemas/Customer'
+        delivery:
+          $ref: '#/components/schemas/CheckoutDelivery'
+
+    CreateCheckoutSuccessResponse:
+      type: object
+      required: [order_id, internal_order_id, status]
+      properties:
+        order_id:
+          type: string
+          description: Идентификатор заказа в YCP
+          example: ORDER_12345
+        internal_order_id:
+          type: integer
+          description: Внутренний ID заказа в CRM
+          example: 185
+        status:
+          type: string
+          description: Статус созданного заказа
+          enum: [created]
+          example: created
+
+    ActualInventoryItem:
+      type: object
+      required: [id]
+      properties:
+        id:
+          type: string
+          example: "50"
+        warehouses:
+          type: array
+          items:
+            $ref: '#/components/schemas/WarehouseAvailability'
+
+    ActualInventory:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActualInventoryItem'
+
+    CreateCheckoutConflictResponse:
+      type: object
+      required: [error, actual_inventory]
+      properties:
+        error:
+          type: string
+          description: Описание причины конфликта
+          example: Изменились цены или остатки
+        actual_inventory:
+          $ref: '#/components/schemas/ActualInventory'
+
+    PaymentMethod:
+      type: string
+      description: Способ оплаты, переданный Яндексом при подтверждении заказа
+      enum: [online, on_delivery]
+      example: online
+
+    CheckoutPlacedRequest:
+      type: object
+      required: [session_id, order_id, payment_method]
+      properties:
+        session_id:
+          type: string
+          description: Идентификатор сессии
+          example: 019c18f6-cb3c-7f31-9395-53925a6b0e28
+        order_id:
+          type: string
+          description: Идентификатор заказа
+          example: ORDER_12345
+        payment_method:
+          $ref: '#/components/schemas/PaymentMethod'
+
+    CheckoutCancelRequest:
+      type: object
+      required: [session_id]
+      properties:
+        session_id:
+          type: string
+          description: Идентификатор сессии
+          example: 019c18f6-cb3c-7f31-9395-53925a6b0e28
